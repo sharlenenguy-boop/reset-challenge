@@ -126,7 +126,8 @@ body{font-family:'Nunito',sans-serif;background-color:#fef7ee;
 .lb-header p{font-size:13px;color:#888;margin-top:4px;}
 .lb-refresh{border:2px solid #1e5cc8;background:#fff;border-radius:10px;padding:7px 20px;font-size:13px;font-family:'Nunito',sans-serif;cursor:pointer;color:#1e5cc8;font-weight:700;margin-top:10px;}
 .lb-list{display:flex;flex-direction:column;gap:8px;}
-.lb-row{background:rgba(255,255,255,.93);border:2px solid #c8d8f5;border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:12px;}
+.lb-row{background:rgba(255,255,255,.93);border:2px solid #c8d8f5;border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:transform .12s,box-shadow .12s;}
+.lb-row:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(30,92,200,.12);}
 .lb-row.me{border-color:#e07820;background:rgba(255,248,225,.95);}
 .lb-row.top1{border-color:#f5c842;background:rgba(255,251,210,.97);}
 .lb-medal{font-size:26px;min-width:32px;text-align:center;}
@@ -141,7 +142,17 @@ body{font-family:'Nunito',sans-serif;background-color:#fef7ee;
 .lb-score{text-align:right;}
 .lb-pct{font-size:22px;font-weight:900;color:#e07820;}
 .lb-done{font-size:11px;color:#888;font-weight:600;}
+.lb-view{font-size:10px;color:#1e5cc8;font-weight:800;margin-top:3px;}
 .lb-msg{text-align:center;padding:36px 20px;color:#aaa;font-size:14px;font-weight:700;}
+.viewer-overlay{display:none;position:fixed;inset:0;background:rgba(10,20,80,.50);z-index:700;align-items:flex-start;justify-content:center;overflow:auto;padding:28px 14px;}
+.viewer-overlay.open{display:flex;}
+.viewer-card{background:#fff;border:2.5px solid #e07820;border-radius:22px;padding:18px;width:min(760px,96vw);box-shadow:0 8px 40px rgba(0,0,0,.20);}
+.viewer-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;}
+.viewer-title{font-family:'Playfair Display',serif;font-size:22px;color:#1e3a8a;font-weight:700;}
+.viewer-sub{font-size:13px;color:#888;font-weight:700;margin-top:2px;}
+.viewer-close{border:2px solid #c8d8f5;background:#fff;border-radius:10px;padding:6px 12px;font-size:13px;font-family:'Nunito',sans-serif;font-weight:800;color:#1e5cc8;cursor:pointer;}
+.viewer-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;}
+.viewer-grid .cell{cursor:default;min-height:104px;}
 .saving-toast{position:fixed;bottom:24px;right:24px;background:#1e5cc8;color:#fff;border-radius:12px;padding:10px 18px;font-size:13px;font-weight:700;font-family:'Nunito',sans-serif;opacity:0;transition:opacity .3s;z-index:999;pointer-events:none;}
 .saving-toast.show{opacity:1;}
 </style>
@@ -322,7 +333,7 @@ async function dbUpsert(row) {
 async function dbLoadAll() {
   if (!DB_READY) return null;
   try {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/scores?select=name,done,inprog,pct,updated&order=pct.desc,done.desc', {
+    const r = await fetch(SUPABASE_URL + '/rest/v1/scores?select=name,done,inprog,pct,updated,state&order=pct.desc,done.desc', {
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': 'Bearer ' + SUPABASE_KEY
@@ -483,10 +494,57 @@ async function loadLB() {
         <div class="lb-sub">${e.done} completed · ${e.inprog} in progress${updated ? ' · '+updated : ''}</div>
         <div class="lb-bar-bg"><div class="lb-bar" style="width:${e.pct}%"></div></div>
       </div>
-      <div class="lb-score"><div class="lb-pct">${e.pct}%</div><div class="lb-done">${e.done}/24</div></div>`;
+      <div class="lb-score"><div class="lb-pct">${e.pct}%</div><div class="lb-done">${e.done}/24</div><div class="lb-view">view card</div></div>`;
+    div.onclick = () => openViewer(e);
     list.appendChild(div);
   });
 }
+
+
+function parseState(raw) {
+  if (!raw) return BLANK();
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) && parsed.length === CELLS.length ? parsed : BLANK();
+  } catch(e) { return BLANK(); }
+}
+
+function openViewer(entry) {
+  const viewState = parseState(entry.state);
+  document.getElementById('viewer-title').textContent = entry.name + "'s Bingo Card";
+  document.getElementById('viewer-sub').textContent = entry.done + ' completed · ' + entry.inprog + ' in progress · ' + entry.pct + '%';
+  const vg = document.getElementById('viewer-grid');
+  vg.innerHTML = '';
+  CELLS.forEach((c,i) => {
+    const state = viewState[i] || {s:c.t==='free'?'complete':'none',p:c.t==='free'?100:0};
+    const d = document.createElement('div');
+    d.className = 'cell' + (c.t==='free'?' free':'') + (state.s==='partial'?' partial':'') + (state.s==='complete'&&c.t!=='free'?' complete':'');
+    const art = document.createElement('div'); art.className='cell-art'; art.textContent=c.a;
+    const lbl = document.createElement('div'); lbl.className='cell-lbl'; lbl.textContent=c.l;
+    d.appendChild(art); d.appendChild(lbl);
+    if (c.t==='free') {
+      const cr=document.createElement('div'); cr.className='free-crown'; cr.textContent='👑'; d.appendChild(cr);
+    } else if (state.s==='complete') {
+      const tk=document.createElement('div'); tk.className='tick';
+      tk.innerHTML='<svg viewBox="0 0 12 12" fill="none"><polyline points="1.5,6 4.5,9 10.5,3" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      d.appendChild(tk);
+    }
+    if (c.t==='progress') {
+      const pw=document.createElement('div'); pw.className='pbar-wrap';
+      pw.innerHTML='<div class="pbar-track"><div class="pbar-fill" style="width:'+state.p+'%"></div></div><div class="pbar-lbl">'+(state.s==='none'&&state.p===0?'not started':state.p+'%')+'</div>';
+      d.appendChild(pw);
+    } else if (c.t==='check') {
+      const h=document.createElement('div'); h.className='hint';
+      h.textContent=state.s==='none'?'not started':state.s==='partial'?'in progress':'✓ done';
+      d.appendChild(h);
+    }
+    vg.appendChild(d);
+  });
+  document.getElementById('viewer').classList.add('open');
+}
+
+function closeViewer() { document.getElementById('viewer').classList.remove('open'); }
+function handleViewerOverlayClick(e) { if(e.target===document.getElementById('viewer')) closeViewer(); }
 
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
